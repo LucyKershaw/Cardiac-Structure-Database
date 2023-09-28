@@ -35,48 +35,54 @@ FORCE=0
 # modify the .. by the local path of this directory: Data_For_Reviewer/Data/
 # the data is available at this link : https://zenodo.org/record/5140252
 
-FOLDER_TRANSFORM_DTI=../Data/${NUM}/Transform/
-FOLDER_INITIAL=../Data/${NUM}/Native/
-FOLDER_ALIGNED=../Data/${NUM}/Aligned/
-FOLDER_FIGURES=../Figures/
+FOLDER_TRANSFORM_DTI=/Users/lkershaw/Data/Data_For_Reviewer/Data/${NUM}/Transform/
+FOLDER_INITIAL=/Users/lkershaw/Data/Data_For_Reviewer/Data/${NUM}/Native/
+FOLDER_ALIGNED=/Users/lkershaw/Data/Data_For_Reviewer/Data/${NUM}/Aligned/
+FOLDER_FIGURES=/Users/lkershaw/Data/Data_For_Reviewer/Figures/
 
 mkdir ${FOLDER_ALIGNED}
 mkdir ${FOLDER_FIGURES}
 
 FOLDER_VECTORS=${FOLDER_INITIAL}/Vectors/
 
-CheckFolder ${FOLDER_TRANSFORM_DTI}
+CheckFolder ${FOLDER_TRANSFORM_DTI} #Check that folders exist: transform folder, native folder, aligned
 CheckFolder ${FOLDER_INITIAL}
 CheckFolder ${FOLDER_ALIGNED}
 
-TENSOR_4D_NII=${FOLDER_INITIAL}/tensor_${NUM}_4D.nii.gz
+TENSOR_4D_NII=${FOLDER_INITIAL}/tensor_${NUM}_4D.nii.gz #set the name for the 4D and 5D tensors.  NUM refers to the case number in the original data folders (1, 2, 3)
 TENSOR_5D_NII=${FOLDER_INITIAL}/tensor_${NUM}_5D.nii.gz
-CheckFile ${TENSOR_4D_NII}  
+CheckFile ${TENSOR_4D_NII}  # And make sure it exists
 
 MEAN_NII=${FOLDER_INITIAL}/mean_bzero_${NUM}.nii.gz  
-CheckFile ${MEAN_NII}  
+CheckFile ${MEAN_NII}  # Make sure that the mean B0 image also exists
 
 MASK_THRESHOLD_NII=${FOLDER_INITIAL}/mask_threshold_${NUM}_all.nii.gz  
-CheckFile ${MASK_THRESHOLD_NII} 
+CheckFile ${MASK_THRESHOLD_NII} # And a threshold mask.
 
-FA=${FOLDER_INITIAL}/fa_${NUM}.nii.gz
+FA=${FOLDER_INITIAL}/fa_${NUM}.nii.gz #set the FA and ADC image filenames, and the eigenvectors v1,2,3
 ADC=${FOLDER_INITIAL}/adc_${NUM}.nii.gz
   
 V1=${FOLDER_VECTORS}v1_${NUM}.nii.gz
 V2=${FOLDER_VECTORS}v2_${NUM}.nii.gz 
 V3=${FOLDER_VECTORS}v3_${NUM}.nii.gz
 
-# check FA in moved position   
+# check FA in moved position.  I think this is bash for 'if this file does not exist', or the FORCE option =1 (ie do it anyway) then create it using MRTrix
+# The confusing thing here is that it says in MOVED position.  Should I have done something else before running this?  Possibly not - might be a copy-paste error.
+# This should say 'original position' I think.
+# The format throughout here is 4D NII from MRTrix
 if [[ ! -f ${FA} ]] || [[ "${FORCE}" = 1 ]] ;  then
-logCmd tensor2metric ${TENSOR_4D_NII} -fa ${FA} --force
+logCmd tensor2metric ${TENSOR_4D_NII} -fa ${FA} --force 
 fi
 
 # check RGB in moved position , this can be open in 3Dslicer 
+# NOT SURE WHAT RGB IS HERE, this makes the ADC map
+# Think this should also be in original position 
 if [[ ! -f ${ADC} ]] || [[ "${FORCE}" = 1 ]] ;  then  
 logCmd tensor2metric ${TENSOR_4D_NII} -adc ${ADC} --force
 fi
 
-# check orientation in moved position   
+# check orientation in moved position  
+# Original position.  This makes the three diffusion vectors 
 if [[ ! -f ${V1} ]] || [[ "${FORCE}" = 1 ]] ;  then 
 logCmd tensor2metric ${TENSOR_4D_NII} -vector ${V1} -num 1 --force
 logCmd tensor2metric ${TENSOR_4D_NII} -vector ${V2} -num 2 --force  
@@ -84,91 +90,98 @@ logCmd tensor2metric ${TENSOR_4D_NII} -vector ${V3} -num 3 --force
 fi
 
 
-# convert nifti 4D  to nifti 5D
+# convert nifti 4D  to nifti 5D 
+# This is the crucial preprocessing step.  SO if the 5D file doesn't exist.....
 CheckFile ${TENSOR_4D_NII}
 if [[ ! -f ${TENSOR_5D_NII} ]] || [[ "${FORCE}" = 1 ]] ;  then 
 # check input format 
-PrintHeader ${TENSOR_4D_NII} | cat  | grep "dim\[4] =" | grep -v "pixdim"
-PrintHeader ${TENSOR_4D_NII} | cat  | grep "dim\[5] =" | grep -v "pixdim"
-logCmd ./conversion_MRtrix_4D_to_ANTs_5D.sh	 ${TIME} ${TENSOR_4D_NII} ${TENSOR_5D_NII}
-# check output format 
-PrintHeader ${TENSOR_5D_NII} | cat  | grep "dim\[4] =" | grep -v "pixdim"
-PrintHeader ${TENSOR_5D_NII} | cat  | grep "dim\[5] =" | grep -v "pixdim"  
+PrintHeader ${TENSOR_4D_NII} | cat  | grep "dim\[4] =" | grep -v "pixdim" # This finds the size of the 4th dimension of the data (6) (-v pixdim excludes the match of pixdim[4] later in the header)
+PrintHeader ${TENSOR_4D_NII} | cat  | grep "dim\[5] =" | grep -v "pixdim" # Similarly for the 5th dimension (should be 1).
+logCmd ./conversion_MRtrix_4D_to_ANTs_5D.sh	 ${TIME} ${TENSOR_4D_NII} ${TENSOR_5D_NII} # Now do the conversion
+# check output format for the 5D version
+PrintHeader ${TENSOR_5D_NII} | cat  | grep "dim\[4] =" | grep -v "pixdim" # should be 1 
+PrintHeader ${TENSOR_5D_NII} | cat  | grep "dim\[5] =" | grep -v "pixdim" # should now be 6
 
 fi
 
 
+# Use itk snap to do realignment manually
+#echo itksnap -g ${MEAN_NII} -o ${MEAN_NII}
+#echo 'follow the wiki'
 
-echo itksnap -g ${MEAN_NII} -o ${MEAN_NII}
-echo 'follow the wiki'
+# Set filenames
+MEAN_NII_MOVED_TO_LA=${FOLDER_ALIGNED}/mean_bzero_${NUM}_to_LA_via_ants.nii.gz # this is the realigned mean b0
+MASK_THRESHOLD_MOVED_TO_LA=${FOLDER_ALIGNED}/mask_threshold_${NUM}_all_to_LA_via_ants.nii.gz # This is the realigned mask
+TENSOR_5D_NII_DEFORMED=${FOLDER_ALIGNED}/tensor_${NUM}_moved_5D_deformed.nii.gz # This is the deformed 5D tensor
+TENSOR_5D_NII_REORIENTED=${FOLDER_ALIGNED}/tensor_${NUM}_moved_5D_reoriented.nii.gz # THis is the moved 5D tensor
 
 
-MEAN_NII_MOVED_TO_LA=${FOLDER_ALIGNED}/mean_bzero_${NUM}_to_LA_via_ants.nii.gz
-MASK_THRESHOLD_MOVED_TO_LA=${FOLDER_ALIGNED}/mask_threshold_${NUM}_all_to_LA_via_ants.nii.gz
-TENSOR_5D_NII_DEFORMED=${FOLDER_ALIGNED}/tensor_${NUM}_moved_5D_deformed.nii.gz
-TENSOR_5D_NII_REORIENTED=${FOLDER_ALIGNED}/tensor_${NUM}_moved_5D_reoriented.nii.gz   
-
-
-
+# Check original files exist
 CheckFile ${MEAN_NII} 
 CheckFile ${MASK_THRESHOLD_NII}
 CheckFile ${TENSOR_5D_NII} 
 
-TRANSFORM_INITIAL_TO_LA=${FOLDER_TRANSFORM_DTI}/transform-itk_to_LA.txt
-REFERENCE=${FOLDER_TRANSFORM_DTI}/resliced_volume_in_LA_space.nii.gz
+# Set filenames
+TRANSFORM_INITIAL_TO_LA=${FOLDER_TRANSFORM_DTI}/transform-itk_to_LA.txt # This is the transform to the long axis saved from ITKsnap
+REFERENCE=${FOLDER_TRANSFORM_DTI}/resliced_volume_in_LA_space.nii.gz # This is the saved resliced aligned volume from ITKsnap
 # if too small, use mrgrid for padding, this will extent the fov of the new space .
 
+# Check transform and reference volume exist
 CheckFile ${TRANSFORM_INITIAL_TO_LA} 
 CheckFile ${REFERENCE} 
 
 #~TRANSFORM_ITK_COMPOSITE=${DIRECTORY}/T_${NUM}_DT_to_ST_to_LA_Aligned_composite${NT}0CompositeWarp.nii.gz
-TRANSFORM_ITK_COMPOSITE=${FOLDER_TRANSFORM_DTI}/transform_composite_Linear.mat	
+TRANSFORM_ITK_COMPOSITE=${FOLDER_TRANSFORM_DTI}/transform_composite_Linear.mat	#Set a name for the composite transform
 
                    
 
 # creating a .mat transform 
 # could be also a vector field for non linear registration     
-
+# If the transform file with name set as above doesn't exist..... then make it using ants to apply the transforms together to make a .mat file
 if [[ ! -f ${TRANSFORM_ITK_COMPOSITE} ]] || [[ "${FORCE}" = 1 ]] ;  then 
 logCmd antsApplyTransforms -d 3 -o Linear[${TRANSFORM_ITK_COMPOSITE}] \
                         -t ${TRANSFORM_INITIAL_TO_LA} \
                         -r ${REFERENCE}  -v                       
 fi
 
-CheckFile ${TRANSFORM_ITK_COMPOSITE}
+CheckFile ${TRANSFORM_ITK_COMPOSITE} # And now check that this worked.
  
 
+# And now actually apply these transforms to the images.... mean B0.....
 if [[ ! -f ${MEAN_NII_MOVED_TO_LA} ]] || [[ "${FORCE}" = 1 ]] ;  then 
 logCmd antsApplyTransforms -d 3  -i ${MEAN_NII} -o ${MEAN_NII_MOVED_TO_LA} -t ${TRANSFORM_ITK_COMPOSITE}  -r ${REFERENCE}  -f 0.00001 -v 1
 fi
 
+
+#...Mask threshold...
 if [[ ! -f ${MASK_THRESHOLD_MOVED_TO_LA} ]] || [[ "${FORCE}" = 1 ]] ;  then 
 logCmd antsApplyTransforms -d 3  -i ${MASK_THRESHOLD_NII} -o ${MASK_THRESHOLD_MOVED_TO_LA} -t ${TRANSFORM_ITK_COMPOSITE}  -r ${REFERENCE}  -f 0.00001 -v 1
 fi
 
    
-
+#...5D tensor deformation...
 if [[ ! -f ${TENSOR_5D_NII_DEFORMED} ]] || [[ "${FORCE}" = 1 ]] ;  then  
 logCmd antsApplyTransforms -d 3 -e 2 -i ${TENSOR_5D_NII} -o ${TENSOR_5D_NII_DEFORMED} -t ${TRANSFORM_ITK_COMPOSITE}  -r ${REFERENCE}  -f 0.00001 -v 1 
 fi
 
 ## If you have computed a single affine transform only, you can reorient the tensor at this stage:
+# If the reoriented 5D tensor doesn't yet exist, then reorient it
 if [[ ! -f ${TENSOR_5D_NII_REORIENTED} ]] || [[ "${FORCE}" = 1 ]] ;  then 
 logCmd ReorientTensorImage 3 ${TENSOR_5D_NII_DEFORMED} ${TENSOR_5D_NII_REORIENTED} ${TRANSFORM_ITK_COMPOSITE} 
 fi 
 
 
 TENSOR_4D_NII_REORIENTED=${FOLDER_ALIGNED}/tensor_${NUM}_4D_moved_reoriented.nii.gz
-# convert nifti 5D  to nifti 4D
+# convert nifti 5D back to nifti 4D
 CheckFile ${TENSOR_5D_NII_REORIENTED}
 if [[ ! -f ${TENSOR_4D_NII_REORIENTED} ]] || [[ "${FORCE}" = 1 ]] ;  then 
-# check input format 
+# check input format, ie the 4th and 5th dimension sizes
 PrintHeader ${TENSOR_5D_NII_REORIENTED} | cat  | grep "dim\[4] =" | grep -v "pixdim"
 PrintHeader ${TENSOR_5D_NII_REORIENTED} | cat  | grep "dim\[5] =" | grep -v "pixdim"
 # convert the new tensor to 4D format  
 logCmd ./conversion_ANTs_5D_to_MRtrix_4D.sh ${TIME} ${TENSOR_5D_NII_REORIENTED} ${TENSOR_4D_NII_REORIENTED} 
 
-# check output format 
+# check output format, so 4th and 5th dimension sizes should have swapped places
 PrintHeader ${TENSOR_4D_NII_REORIENTED} | cat  | grep "dim\[4] =" | grep -v "pixdim"
 PrintHeader ${TENSOR_4D_NII_REORIENTED} | cat  | grep "dim\[5] =" | grep -v "pixdim"  
 
@@ -182,24 +195,24 @@ V1_REORIENTED=${FOLDER_ALIGNED}/Vectors/v1_${NUM}_moved_reoriented.nii.gz
 V2_REORIENTED=${FOLDER_ALIGNED}/Vectors/v2_${NUM}_moved_reoriented.nii.gz
 V3_REORIENTED=${FOLDER_ALIGNED}/Vectors/v3_${NUM}_moved_reoriented.nii.gz
 
-# check FA in moved position 
+# check FA in moved position, ie make an fa map from the reoriented tensor
 if [[ ! -f ${FA_REORIENTED} ]] || [[ "${FORCE}" = 1 ]] ;  then   
 logCmd tensor2metric ${TENSOR_4D_NII} -fa ${FA_REORIENTED} --force
 fi
 
-# check RGB in moved position , this can be open in 3Dslicer   
+# similarly check RGB in moved position, this can be open in 3Dslicer
 if [[ ! -f ${ADC_REORIENTED} ]] || [[ "${FORCE}" = 1 ]] ;  then   
 logCmd tensor2metric ${TENSOR_4D_NII} -adc ${ADC_REORIENTED} --force
 fi
 
-# check orientation in moved position   
+# check orientation in moved position   by making new vectors from the reoriented tensor
 if [[ ! -f ${V1_REORIENTED} ]] || [[ "${FORCE}" = 1 ]] ;  then 
 logCmd tensor2metric ${TENSOR_4D_NII_REORIENTED} -vector ${V1_REORIENTED} -num 1 --force
 logCmd tensor2metric ${TENSOR_4D_NII_REORIENTED} -vector ${V2_REORIENTED} -num 2 --force  
 logCmd tensor2metric ${TENSOR_4D_NII_REORIENTED} -vector ${V3_REORIENTED} -num 3 --force
 fi
 
-
+# This sets the location for the figures made below.....
 X1=-4
 Y1=-32
 Z1=4
